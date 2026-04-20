@@ -1490,7 +1490,7 @@ run_simulation_and_analysis <- function(
                    "ve11","ve22","rE12",
                    "b21","b12")
   
-  mma_var_m2 <- mma_safe_biv(
+  mma_var_m2 <- mxModelAverage(
     reference   = colP_all_m2,
     models      = fitACE5_aug_m2,
     include     = "all",
