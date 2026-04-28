@@ -263,7 +263,7 @@ fit_univariate <- function(
     topName = "uni",
     selVars = c("p1_t1","p1_t2"),
     nv = 1,
-    lboundVar = NA,
+    lboundVar = 1e-5,  
     
     means = list(me1 = c(TRUE, 0)),
     
@@ -283,14 +283,17 @@ fit_univariate <- function(
 ) {
   stopifnot(nv == 1)
   
-  dataMZ <- subset(data, zyg %in% c(1))
-  dataDZ <- subset(data, zyg %in% c(2))
+  dataMZ <- subset(data, zyg==1)
+  dataDZ <- subset(data, zyg==2)
   
   get_fs <- function(x, nm) {
     if (is.null(x) || length(x) != 2) stop("Parameter '", nm, "' must be c(free, start).")
     list(free = as.logical(x[[1]]), start = as.numeric(x[[2]]))
   }
   
+  # ----------------------------
+  # Means
+  # ----------------------------
   me1 <- get_fs(means$me1, "me1")
   
   M <- mxMatrix("Full", 1, 1,
@@ -301,9 +304,12 @@ fit_univariate <- function(
   
   expMean <- mxAlgebra(
     cbind(M[1,1], M[1,1]),
-    name="expMean"
+    name = "expMean"
   )
   
+  # ----------------------------
+  # Sibling interaction (s1)
+  # ----------------------------
   if (is.null(S$s1)) S$s1 <- c(FALSE, 0)
   s1 <- get_fs(S$s1, "s1")
   
@@ -324,31 +330,44 @@ fit_univariate <- function(
                    free   = as.vector(t(Bsib_free)),
                    values = as.vector(t(Bsib_values)),
                    labels = as.vector(t(Bsib_labels)),
-                   lbound = as.vector(t(ifelse(Bsib_free, -0.50, NA))),
-                   ubound = as.vector(t(ifelse(Bsib_free,  0.50, NA))),
+                   lbound = as.vector(t(ifelse(Bsib_free, -.50, NA))),
+                   ubound = as.vector(t(ifelse(Bsib_free,  .50, NA))),
                    byrow  = TRUE,
                    name   = "Bsib")
   
   I2 <- mxMatrix("Iden", 2, 2, name="I2")
   G_sib <- mxAlgebra(solve(I2 - Bsib), name="G_sib")
   
+  # ----------------------------
+  # Variance components
+  # ----------------------------
   a11 <- get_fs(A_diag$a11, "A_diag$a11")
   c11 <- get_fs(C_diag$c11, "C_diag$c11")
   d11 <- get_fs(D_diag$d11, "D_diag$d11")
   e11 <- get_fs(E_diag$e11, "E_diag$e11")
   
   mkDiagVar <- function(spec, label, name) {
-    free   <- spec$free
-    val_v  <- spec$start
-    if (!is.finite(val_v) || val_v < 0) stop(name, " start variance must be finite and >= 0.")
-    lbound <- if (free) lboundVar else NA
-    lab    <- if (free) label else NA_character_
-    mxMatrix("Diag", 1, 1,
-             free   = free,
-             values = val_v,
-             lbound = lbound,
-             labels = lab,
-             name   = name)
+    free  <- spec$free
+    val_v <- spec$start
+    if (!is.finite(val_v)) stop(name, " start variance must be finite.")
+    
+    lab <- if (free) label else NA_character_
+    
+    
+    if (free && !is.na(lboundVar)) {
+      mxMatrix("Diag", 1, 1,
+               free   = free,
+               values = val_v,
+               lbound = lboundVar,
+               labels = lab,
+               name   = name)
+    } else {
+      mxMatrix("Diag", 1, 1,
+               free   = free,
+               values = val_v,
+               labels = lab,
+               name   = name)
+    }
   }
   
   aV <- mkDiagVar(a11, "va11", "aV")
@@ -356,15 +375,10 @@ fit_univariate <- function(
   dV <- mkDiagVar(d11, "vd11", "dV")
   eV <- mkDiagVar(e11, "ve11", "eV")
   
-  aSD <- mxAlgebra(vec2diag(sqrt(diag2vec(aV))), name="aSD")
-  cSD <- mxAlgebra(vec2diag(sqrt(diag2vec(cV))), name="cSD")
-  dSD <- mxAlgebra(vec2diag(sqrt(diag2vec(dV))), name="dSD")
-  eSD <- mxAlgebra(vec2diag(sqrt(diag2vec(eV))), name="eSD")
-  
-  A <- mxAlgebra(aSD %*% t(aSD), name="A")
-  C <- mxAlgebra(cSD %*% t(cSD), name="C")
-  D <- mxAlgebra(dSD %*% t(dSD), name="D")
-  E <- mxAlgebra(eSD %*% t(eSD), name="E")
+  A <- mxAlgebra(aV, name="A")
+  C <- mxAlgebra(cV, name="C")
+  D <- mxAlgebra(dV, name="D")
+  E <- mxAlgebra(eV, name="E")
   
   V   <- mxAlgebra(A + C + D + E, name="V")
   cMZ <- mxAlgebra(A + C + D, name="cMZ")
@@ -402,7 +416,6 @@ fit_univariate <- function(
                  M, expMean,
                  Bsib, I2, G_sib,
                  aV, cV, dV, eV,
-                 aSD, cSD, dSD, eSD,
                  A, C, D, E,
                  V, cMZ, cDZ,
                  expCovMZ, expCovDZ,
@@ -420,8 +433,10 @@ fit_univariate <- function(
   } else {
     fit <- mxRun(top, intervals=intervals)
   }
+  
   fit
 }
+
 
 
 
